@@ -3,9 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hand Track UI</title>
+<title>Hand Track UI (Fixed)</title>
 
-<!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
@@ -13,71 +12,37 @@
 body {
   margin: 0;
   overflow: hidden;
-  font-family: Arial, sans-serif;
   background: black;
+  font-family: Arial;
 }
 
-/* Video */
 video {
   position: absolute;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1); /* mirror */
+  transform: scaleX(-1); /* keep mirror */
 }
 
-/* Canvas */
 canvas {
   position: absolute;
   top: 0;
   left: 0;
 }
 
-/* UI Panels */
+/* UI */
 .panel {
   position: absolute;
+  top: 20px;
+  left: 20px;
+  color: cyan;
+  background: rgba(0,0,0,0.4);
   padding: 10px 15px;
   border-radius: 10px;
   backdrop-filter: blur(10px);
-  background: rgba(0,0,0,0.4);
-  color: #0ff;
   border: 1px solid rgba(0,255,255,0.3);
 }
 
-/* Top Left Panel */
-#title {
-  top: 20px;
-  left: 20px;
-  font-weight: bold;
-}
-
-/* Right Buttons */
-.button {
-  position: absolute;
-  right: 20px;
-  padding: 10px 15px;
-  border-radius: 8px;
-  border: 1px solid;
-  cursor: pointer;
-}
-
-#btn1 { top: 80px; border-color: #a855f7; color: #a855f7; }
-#btn2 { top: 140px; border-color: #22c55e; color: #22c55e; }
-
-/* Color Palette */
-.palette {
-  position: absolute;
-  left: 20px;
-  top: 100px;
-}
-.color {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  margin: 10px 0;
-}
-
-/* Status Text */
 #status {
   position: absolute;
   top: 200px;
@@ -93,18 +58,7 @@ canvas {
 <video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
 
-<div id="title" class="panel">HAND TRACK SYSTEM</div>
-
-<div id="btn1" class="button">PLAN</div>
-<div id="btn2" class="button">RUN</div>
-
-<div class="palette">
-  <div class="color" style="background:#ff4d4d"></div>
-  <div class="color" style="background:#00ffff"></div>
-  <div class="color" style="background:#ffffff"></div>
-  <div class="color" style="background:#22c55e"></div>
-</div>
-
+<div class="panel">HAND TRACK SYSTEM</div>
 <div id="status">IDLE</div>
 
 <script>
@@ -115,7 +69,7 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-/* Interaction Box */
+/* Box */
 const box = {
   x: 200,
   y: 200,
@@ -124,7 +78,7 @@ const box = {
   active: false
 };
 
-/* MediaPipe Setup */
+/* MediaPipe */
 const hands = new Hands({
   locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 });
@@ -136,7 +90,7 @@ hands.setOptions({
   minTrackingConfidence: 0.7
 });
 
-/* Draw Connections */
+/* Connections */
 const connections = [
   [0,1],[1,2],[2,3],[3,4],
   [0,5],[5,6],[6,7],[7,8],
@@ -146,13 +100,13 @@ const connections = [
   [0,17]
 ];
 
-/* Finger Trail */
+/* Trail */
 let trail = [];
 
 hands.onResults(results => {
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  /* Draw Box */
+  /* Draw box */
   ctx.strokeStyle = box.active ? "#22c55e" : "white";
   ctx.lineWidth = 3;
   ctx.strokeRect(box.x, box.y, box.w, box.h);
@@ -160,27 +114,36 @@ hands.onResults(results => {
   if (results.multiHandLandmarks) {
     results.multiHandLandmarks.forEach(hand => {
 
-      /* Draw Skeleton */
+      /* Draw skeleton */
       ctx.strokeStyle = "cyan";
       ctx.lineWidth = 2;
 
       connections.forEach(([a,b]) => {
+        const x1 = (1 - hand[a].x) * canvas.width;
+        const y1 = hand[a].y * canvas.height;
+
+        const x2 = (1 - hand[b].x) * canvas.width;
+        const y2 = hand[b].y * canvas.height;
+
         ctx.beginPath();
-        ctx.moveTo(hand[a].x * canvas.width, hand[a].y * canvas.height);
-        ctx.lineTo(hand[b].x * canvas.width, hand[b].y * canvas.height);
+        ctx.moveTo(x1,y1);
+        ctx.lineTo(x2,y2);
         ctx.stroke();
       });
 
-      /* Draw Points */
-      hand.forEach(p => {
+      /* Draw points */
+      hand.forEach(point => {
+        const px = (1 - point.x) * canvas.width;
+        const py = point.y * canvas.height;
+
         ctx.beginPath();
-        ctx.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, 2*Math.PI);
+        ctx.arc(px, py, 4, 0, 2*Math.PI);
         ctx.fillStyle = "cyan";
         ctx.fill();
       });
 
-      /* Index Finger */
-      const x = hand[8].x * canvas.width;
+      /* Index finger */
+      const x = (1 - hand[8].x) * canvas.width;
       const y = hand[8].y * canvas.height;
 
       /* Trail */
@@ -195,7 +158,7 @@ hands.onResults(results => {
       });
       ctx.stroke();
 
-      /* Box Detection */
+      /* Box detection */
       if (x > box.x && x < box.x + box.w &&
           y > box.y && y < box.y + box.h) {
         box.active = true;
@@ -204,6 +167,7 @@ hands.onResults(results => {
         box.active = false;
         document.getElementById("status").innerText = "IDLE";
       }
+
     });
   }
 });
