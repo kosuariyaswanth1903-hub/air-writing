@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gesture Drawing Final</title>
+<title>Air Draw - Stable</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -21,13 +21,15 @@ video {
 
 canvas {
   position:absolute;
-  top:0; left:0;
+  top:0;
+  left:0;
 }
 
 #mode {
   position:absolute;
-  top:20px; left:20px;
-  color:cyan;
+  top:20px;
+  left:20px;
+  color:white;
   font-size:20px;
 }
 </style>
@@ -37,160 +39,138 @@ canvas {
 
 <video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
-<div id="mode">MODE: NONE</div>
+<div id="mode">MODE: IDLE</div>
 
 <script>
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const modeText = document.getElementById("mode");
 
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-/* Drawing */
 let strokes = [];
 let currentStroke = null;
+let mode = "IDLE";
 
-/* Move offset */
-let offsetX = 0;
-let offsetY = 0;
+let offset = {x:0, y:0};
+let pinchStart = null;
+let offsetStart = null;
 
-let prevPinchX = null;
-let prevPinchY = null;
+function mirrorX(x) {
+  return (1 - x) * canvas.width;
+}
 
-let prevX = null;
-let prevY = null;
+function getPos(p) {
+  return {
+    x: mirrorX(p.x),
+    y: p.y * canvas.height
+  };
+}
 
-/* MediaPipe */
+function detect(hand) {
+  const up = (tip, pip) => hand[tip].y < hand[pip].y;
+
+  const index = up(8,6);
+  const middle = up(12,10);
+  const ring = up(16,14);
+  const pinky = up(20,18);
+
+  const dx = hand[4].x - hand[8].x;
+  const dy = hand[4].y - hand[8].y;
+  const pinch = Math.hypot(dx,dy) < 0.05;
+
+  if (pinch) return "MOVE";
+  if (!index && !middle && !ring && !pinky) return "PAUSE";
+  if (index && !middle && !ring && !pinky) return "DRAW";
+
+  return "IDLE";
+}
+
+function drawAll() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  strokes.forEach(s => {
+    if (s.points.length < 2) return;
+
+    ctx.beginPath();
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+
+    ctx.moveTo(s.points[0].x + offset.x, s.points[0].y + offset.y);
+
+    for (let i=1;i<s.points.length;i++) {
+      ctx.lineTo(
+        s.points[i].x + offset.x,
+        s.points[i].y + offset.y
+      );
+    }
+    ctx.stroke();
+  });
+}
+
 const hands = new Hands({
-  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
 });
 
 hands.setOptions({
-  maxNumHands: 1,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence: 0.7
+  maxNumHands:1,
+  minDetectionConfidence:0.7,
+  minTrackingConfidence:0.7
 });
 
-/* Finger detection */
-function isFingerUp(tip, pip) {
-  return tip.y < pip.y;
-}
+hands.onResults(res => {
+  drawAll();
 
-hands.onResults(results => {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  /* Draw all strokes */
-  ctx.strokeStyle = "cyan";
-  ctx.lineWidth = 3;
-
-  strokes.forEach(stroke => {
-    if (stroke.length < 2) return;
-
-    ctx.beginPath();
-    ctx.moveTo(stroke[0].x + offsetX, stroke[0].y + offsetY);
-
-    for (let i = 1; i < stroke.length; i++) {
-      ctx.lineTo(stroke[i].x + offsetX, stroke[i].y + offsetY);
-    }
-
-    ctx.stroke();
-  });
-
-  if (!results.multiHandLandmarks) return;
-
-  const hand = results.multiHandLandmarks[0];
-
-  /* ✅ MIRROR FIX */
-  let x = (1 - hand[8].x) * canvas.width;
-  let y = hand[8].y * canvas.height;
-
-  /* Fingers */
-  const indexUp = isFingerUp(hand[8], hand[6]);
-  const middleUp = isFingerUp(hand[12], hand[10]);
-  const ringUp = isFingerUp(hand[16], hand[14]);
-  const pinkyUp = isFingerUp(hand[20], hand[18]);
-
-  /* Pinch */
-  const dx = hand[4].x - hand[8].x;
-  const dy = hand[4].y - hand[8].y;
-  const pinchDist = Math.sqrt(dx*dx + dy*dy);
-  const isPinch = pinchDist < 0.05;
-
-  const isFist = !indexUp && !middleUp && !ringUp && !pinkyUp;
-  const isWriting = indexUp && !middleUp && !ringUp && !pinkyUp;
-
-  let mode = "NONE";
-
-  /* 🤏 MOVE CANVAS */
-  if (isPinch) {
-    mode = "MOVE";
-
-    if (prevPinchX !== null) {
-      offsetX += (x - prevPinchX);
-      offsetY += (y - prevPinchY);
-    }
-
-    prevPinchX = x;
-    prevPinchY = y;
-
+  if (!res.multiHandLandmarks) {
+    mode = "IDLE";
     currentStroke = null;
-    prevX = null;
-
+    return;
   }
-  /* ✊ PAUSE */
-  else if (isFist) {
-    mode = "PAUSE";
 
-    currentStroke = null;
-    prevX = null;
+  const hand = res.multiHandLandmarks[0];
+  const m = detect(hand);
+  const finger = getPos(hand[8]);
 
-    prevPinchX = null;
-    prevPinchY = null;
+  mode = m;
+  modeText.innerText = "MODE: " + mode;
 
-  }
-  /* ☝️ DRAW */
-  else if (isWriting) {
-    mode = "DRAW";
-
-    prevPinchX = null;
-    prevPinchY = null;
-
+  if (mode === "DRAW") {
     if (!currentStroke) {
-      currentStroke = [];
+      currentStroke = {points:[], color:"#00ffff"};
       strokes.push(currentStroke);
     }
 
-    /* Smooth */
-    if (prevX !== null) {
-      x = prevX * 0.7 + x * 0.3;
-      y = prevY * 0.7 + y * 0.3;
+    currentStroke.points.push({
+      x: finger.x - offset.x,
+      y: finger.y - offset.y
+    });
+  } else {
+    currentStroke = null;
+  }
+
+  if (mode === "MOVE") {
+    if (!pinchStart) {
+      pinchStart = finger;
+      offsetStart = {...offset};
     }
 
-    currentStroke.push({x, y});
+    offset.x = offsetStart.x + (finger.x - pinchStart.x);
+    offset.y = offsetStart.y + (finger.y - pinchStart.y);
 
-    prevX = x;
-    prevY = y;
+  } else {
+    pinchStart = null;
   }
-  else {
-    mode = "NONE";
-
-    currentStroke = null;
-    prevX = null;
-
-    prevPinchX = null;
-  }
-
-  document.getElementById("mode").innerText = "MODE: " + mode;
 });
 
-/* Camera */
 const camera = new Camera(video, {
   onFrame: async () => {
     await hands.send({image: video});
   },
-  width: 640,
-  height: 480
+  width:640,
+  height:480
 });
 
 camera.start();
