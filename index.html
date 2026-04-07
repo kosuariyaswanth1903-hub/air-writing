@@ -3,178 +3,321 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Air Draw - Stable</title>
+<title>AIR DRAW \u2014 Gesture System</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <style>
-body { margin:0; overflow:hidden; background:black; }
+  /* \u2500\u2500 Reset & Base \u2500\u2500 */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-video {
-  position:absolute;
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  transform: scaleX(-1);
-}
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
 
-canvas {
-  position:absolute;
-  top:0;
-  left:0;
-}
+  :root {
+    --cyan:    #00f5ff;
+    --green:   #39ff14;
+    --yellow:  #ffe600;
+    --red:     #ff3a5c;
+    --purple:  #c77dff;
+    --bg:      #050a0f;
+    --panel:   rgba(0, 245, 255, 0.06);
+    --border:  rgba(0, 245, 255, 0.22);
+  }
 
-#mode {
-  position:absolute;
-  top:20px;
-  left:20px;
-  color:white;
-  font-size:20px;
-}
+  body {
+    background: var(--bg);
+    overflow: hidden;
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--cyan);
+  }
+
+  /* \u2500\u2500 Video feed (mirrored) \u2500\u2500 */
+  #video {
+    position: absolute;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    opacity: 0.35;          /* dim so drawing pops */
+  }
+
+  /* \u2500\u2500 Drawing canvas (full screen) \u2500\u2500 */
+  #canvas {
+    position: absolute;
+    top: 0; left: 0;
+  }
+
+  /* \u2500\u2500 HUD panels \u2500\u2500 */
+  .hud {
+    position: absolute;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    backdrop-filter: blur(12px);
+    padding: 10px 16px;
+    pointer-events: none;
+    font-family: 'Orbitron', sans-serif;
+  }
+
+  /* Top-left title */
+  #hud-title {
+    top: 18px; left: 18px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--cyan);
+    text-shadow: 0 0 10px var(--cyan);
+  }
+  #hud-title span { opacity: 0.5; font-weight: 400; font-size: 10px; display: block; margin-top: 2px; }
+
+  /* Mode badge \u2014 top-centre */
+  #hud-mode {
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: 6px;
+    padding: 10px 28px;
+    transition: color 0.2s, border-color 0.2s, text-shadow 0.2s, box-shadow 0.2s;
+  }
+
+  /* Top-right controls */
+  #hud-controls {
+    top: 18px; right: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: auto;
+  }
+  .ctrl-btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    backdrop-filter: blur(12px);
+    color: var(--cyan);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    letter-spacing: 2px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background 0.2s, box-shadow 0.2s, color 0.2s;
+  }
+  .ctrl-btn:hover { background: rgba(0,245,255,0.12); box-shadow: 0 0 14px rgba(0,245,255,0.4); }
+  #btn-clear { border-color: var(--red);    color: var(--red); }
+  #btn-clear:hover { background: rgba(255,58,92,0.12); box-shadow: 0 0 14px rgba(255,58,92,0.4); }
+  #btn-color { border-color: var(--purple); color: var(--purple); }
+  #btn-color:hover { background: rgba(199,125,255,0.12); box-shadow: 0 0 14px rgba(199,125,255,0.4); }
+
+  /* Color palette \u2014 left side */
+  #hud-palette {
+    top: 50%;
+    left: 18px;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 10px;
+    pointer-events: auto;
+  }
+  .pal-dot {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  }
+  .pal-dot:hover, .pal-dot.active {
+    transform: scale(1.35);
+    box-shadow: 0 0 10px currentColor;
+  }
+  .pal-dot.active { border-color: white; }
+
+  /* Bottom-left status strip */
+  #hud-status {
+    bottom: 18px; left: 18px;
+    font-size: 11px;
+    line-height: 1.8;
+    opacity: 0.7;
+    color: var(--cyan);
+  }
+
+  /* Gesture legend \u2014 bottom-right */
+  #hud-legend {
+    bottom: 18px; right: 18px;
+    font-size: 10px;
+    line-height: 2;
+    text-align: right;
+    opacity: 0.6;
+  }
+  #hud-legend b { color: white; opacity: 1; }
+
+  /* Crosshair ring around fingertip */
+  #cursor-ring {
+    position: absolute;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--cyan);
+    box-shadow: 0 0 10px var(--cyan), inset 0 0 6px rgba(0,245,255,0.3);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: border-color 0.15s, box-shadow 0.15s, width 0.1s, height 0.1s;
+  }
 </style>
 </head>
 
 <body>
 
-<video id="video" autoplay playsinline></video>
+<!-- \u2500\u2500 Video + Canvas \u2500\u2500 -->
+<video id="video" autoplay playsinline muted></video>
 <canvas id="canvas"></canvas>
-<div id="mode">MODE: IDLE</div>
+
+<!-- \u2500\u2500 Fingertip cursor ring \u2500\u2500 -->
+<div id="cursor-ring"></div>
+
+<!-- \u2500\u2500 HUD \u2500\u2500 -->
+<div id="hud-title" class="hud">
+  AIR DRAW
+  <span>GESTURE SYSTEM v2</span>
+</div>
+
+<div id="hud-mode" class="hud">IDLE</div>
+
+<div id="hud-controls">
+  <button class="ctrl-btn" id="btn-clear">\u232b CLEAR</button>
+  <button class="ctrl-btn" id="btn-color">\u25c8 COLOR</button>
+</div>
+
+<div id="hud-palette">
+  <!-- dots injected by JS -->
+</div>
+
+<div id="hud-status" class="hud">
+  FPS: <span id="fps">--</span><br>
+  STROKES: <span id="stroke-count">0</span><br>
+  HAND: <span id="hand-state">NONE</span>
+</div>
+
+<div id="hud-legend" class="hud">
+  <b>\u261d\ufe0f INDEX UP</b> \u2192 DRAW<br>
+  <b>\u270a FIST</b> \u2192 PAUSE<br>
+  <b>\ud83e\udd0f PINCH</b> \u2192 MOVE ALL<br>
+</div>
+
 
 <script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const modeText = document.getElementById("mode");
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   SECTION 1 \u2014 DOM references & canvas setup
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+const video      = document.getElementById('video');
+const canvas     = document.getElementById('canvas');
+const ctx        = canvas.getContext('2d');
+const modeEl     = document.getElementById('hud-mode');
+const fpsEl      = document.getElementById('fps');
+const strokeEl   = document.getElementById('stroke-count');
+const handEl     = document.getElementById('hand-state');
+const cursorRing = document.getElementById('cursor-ring');
+const paletteEl  = document.getElementById('hud-palette');
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-
-let strokes = [];
-let currentStroke = null;
-let mode = "IDLE";
-
-let offset = {x:0, y:0};
-let pinchStart = null;
-let offsetStart = null;
-
-function mirrorX(x) {
-  return (1 - x) * canvas.width;
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
 }
+resize();
+window.addEventListener('resize', resize);
 
-function getPos(p) {
-  return {
-    x: mirrorX(p.x),
-    y: p.y * canvas.height
-  };
-}
 
-function detect(hand) {
-  const up = (tip, pip) => hand[tip].y < hand[pip].y;
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   SECTION 2 \u2014 Color palette
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+const COLORS = [
+  { hex: '#00f5ff', label: 'CYAN'   },
+  { hex: '#39ff14', label: 'GREEN'  },
+  { hex: '#ffe600', label: 'YELLOW' },
+  { hex: '#ff3a5c', label: 'RED'    },
+  { hex: '#c77dff', label: 'PURPLE' },
+  { hex: '#ffffff', label: 'WHITE'  },
+];
+let activeColor = COLORS[0].hex;
 
-  const index = up(8,6);
-  const middle = up(12,10);
-  const ring = up(16,14);
-  const pinky = up(20,18);
-
-  const dx = hand[4].x - hand[8].x;
-  const dy = hand[4].y - hand[8].y;
-  const pinch = Math.hypot(dx,dy) < 0.05;
-
-  if (pinch) return "MOVE";
-  if (!index && !middle && !ring && !pinky) return "PAUSE";
-  if (index && !middle && !ring && !pinky) return "DRAW";
-
-  return "IDLE";
-}
-
-function drawAll() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  strokes.forEach(s => {
-    if (s.points.length < 2) return;
-
-    ctx.beginPath();
-    ctx.strokeStyle = s.color;
-    ctx.lineWidth = 4;
-    ctx.lineCap = "round";
-
-    ctx.moveTo(s.points[0].x + offset.x, s.points[0].y + offset.y);
-
-    for (let i=1;i<s.points.length;i++) {
-      ctx.lineTo(
-        s.points[i].x + offset.x,
-        s.points[i].y + offset.y
-      );
-    }
-    ctx.stroke();
+COLORS.forEach((c, i) => {
+  const dot = document.createElement('div');
+  dot.className = 'pal-dot' + (i === 0 ? ' active' : '');
+  dot.style.background = c.hex;
+  dot.style.color = c.hex;
+  dot.title = c.label;
+  dot.addEventListener('click', () => {
+    document.querySelectorAll('.pal-dot').forEach(d => d.classList.remove('active'));
+    dot.classList.add('active');
+    activeColor = c.hex;
+    currentStroke = null; // start fresh stroke
   });
+  paletteEl.appendChild(dot);
+});
+
+document.getElementById('btn-color').addEventListener('click', () => {
+  const next = (COLORS.findIndex(c => c.hex === activeColor) + 1) % COLORS.length;
+  paletteEl.querySelectorAll('.pal-dot')[next].click();
+});
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  strokes = [];
+  offsetX = 0;
+  offsetY = 0;
+  strokeEl.textContent = '0';
+});
+
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   SECTION 3 \u2014 Drawing state
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+let strokes      = [];   // array of {color, pts:[{x,y}]}
+let currentStroke = null; // stroke being drawn now
+
+// Global canvas offset (moved by pinch gesture)
+let offsetX = 0;
+let offsetY = 0;
+
+// Smoothed finger position
+let smoothX = 0;
+let smoothY = 0;
+const SMOOTH = 0.65; // 0 = instant, 1 = heavy lag
+
+// Finger trail for visual effect
+let trail = [];
+const TRAIL_LEN = 28;
+
+// Pinch anchor: where the pinch started (in screen coords) and what offset was at that time
+let pinchAnchorFinger = null; // {x, y}
+let pinchAnchorOffset = null; // {x, y}
+
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   SECTION 4 \u2014 Gesture detection helpers
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-const hands = new Hands({
-  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
-});
+function detectGesture(hand) {
+  const indexUp  = hand[8].y  < hand[6].y;
+  const middleUp = hand[12].y < hand[10].y;
+  const ringUp   = hand[16].y < hand[14].y;
+  const pinkyUp  = hand[20].y < hand[18].y;
+  const pinch    = dist(hand[4], hand[8]) < 0.07;
 
-hands.setOptions({
-  maxNumHands:1,
-  minDetectionConfidence:0.7,
-  minTrackingConfidence:0.7
-});
+  // Priority: PINCH > FIST > DRAW
+  if (pinch)                                   return 'MOVE';
+  if (!indexUp && !middleUp && !ringUp && !pinkyUp) return 'PAUSE';
+  if (indexUp  && !middleUp && !ringUp && !pinkyUp) return 'DRAW';
+  return 'IDLE';
+}
 
-hands.onResults(res => {
-  drawAll();
-
-  if (!res.multiHandLandmarks) {
-    mode = "IDLE";
-    currentStroke = null;
-    return;
-  }
-
-  const hand = res.multiHandLandmarks[0];
-  const m = detect(hand);
-  const finger = getPos(hand[8]);
-
-  mode = m;
-  modeText.innerText = "MODE: " + mode;
-
-  if (mode === "DRAW") {
-    if (!currentStroke) {
-      currentStroke = {points:[], color:"#00ffff"};
-      strokes.push(currentStroke);
-    }
-
-    currentStroke.points.push({
-      x: finger.x - offset.x,
-      y: finger.y - offset.y
-    });
-  } else {
-    currentStroke = null;
-  }
-
-  if (mode === "MOVE") {
-    if (!pinchStart) {
-      pinchStart = finger;
-      offsetStart = {...offset};
-    }
-
-    offset.x = offsetStart.x + (finger.x - pinchStart.x);
-    offset.y = offsetStart.y + (finger.y - pinchStart.y);
-
-  } else {
-    pinchStart = null;
-  }
-});
-
-const camera = new Camera(video, {
-  onFrame: async () => {
-    await hands.send({image: video});
-  },
-  width:640,
-  height:480
-});
-
-camera.start();
-</script>
-
-</body>
-</html>
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   SECTION 5 \u2014 Interaction box
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+const box = { x: 200, y: 200, w: 220, h: 150, active
