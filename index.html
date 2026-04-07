@@ -3,618 +3,193 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gesture Drawing - Air Canvas</title>
+<title>Air Draw - Fixed Stable</title>
 
-<!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  user-select: none;
-}
-
-body {
-  margin: 0;
-  overflow: hidden;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: #000;
-}
+body { margin:0; overflow:hidden; background:black; }
 
 video {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  position:absolute;
+  width:100%;
+  height:100%;
+  object-fit:cover;
   transform: scaleX(-1);
 }
 
 canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  position:absolute;
+  top:0;
+  left:0;
 }
 
-/* Simple UI - minimal but functional */
-#modeDisplay {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background: rgba(0,0,0,0.7);
-  color: #0ff;
-  padding: 10px 20px;
-  border-radius: 8px;
-  font-size: 18px;
-  font-weight: bold;
-  font-family: monospace;
-  z-index: 100;
-  border-left: 3px solid #0ff;
-}
-
-#statusText {
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
-  background: rgba(0,0,0,0.6);
-  color: #ccc;
-  padding: 8px 15px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-family: monospace;
-  z-index: 100;
-}
-
-.controls {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
-  display: flex;
-  gap: 12px;
-  z-index: 100;
-}
-
-button {
-  background: rgba(0,0,0,0.7);
-  border: 1px solid #0ff;
-  color: #0ff;
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: bold;
-  transition: 0.2s;
-}
-
-button:hover {
-  background: #0ff;
-  color: #000;
-}
-
-.color-palette {
-  position: absolute;
-  top: 100px;
-  left: 20px;
-  background: rgba(0,0,0,0.6);
-  padding: 10px;
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  z-index: 100;
-}
-
-.color {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px solid rgba(255,255,255,0.3);
-  transition: transform 0.1s;
-}
-
-.color:hover {
-  transform: scale(1.15);
-  border-color: white;
-}
-
-/* Interaction box */
-#boxHint {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: rgba(255,255,255,0.3);
-  font-size: 12px;
-  pointer-events: none;
-  z-index: 50;
-  text-align: center;
+#mode {
+  position:absolute;
+  top:20px;
+  left:20px;
+  color:white;
+  font-size:20px;
 }
 </style>
 </head>
+
 <body>
 
-<video id="video" autoplay playsinline muted></video>
+<video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
-
-<div id="modeDisplay">⚡ IDLE</div>
-<div id="statusText">✋ Show hand to begin</div>
-<div class="color-palette">
-  <div class="color" style="background: #00ffff;" data-color="#00ffff"></div>
-  <div class="color" style="background: #ff4444;" data-color="#ff4444"></div>
-  <div class="color" style="background: #44ff44;" data-color="#44ff44"></div>
-  <div class="color" style="background: #ffff44;" data-color="#ffff44"></div>
-  <div class="color" style="background: #ff44ff;" data-color="#ff44ff"></div>
-</div>
-<div class="controls">
-  <button id="clearBtn">🗑️ CLEAR</button>
-  <button id="resetBtn">⟳ RESET VIEW</button>
-</div>
-<div id="boxHint">◻️ DRAWING ZONE</div>
+<div id="mode">MODE: IDLE</div>
 
 <script>
-// ============================================
-// ADVANCED GESTURE DRAWING SYSTEM
-// Gestures: ☝️ Index = DRAW | ✊ Fist = PAUSE | 🤏 Pinch = MOVE
-// ============================================
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const modeText = document.getElementById("mode");
 
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
-let canvasWidth = window.innerWidth;
-let canvasHeight = window.innerHeight;
-
-function resizeCanvas() {
-  canvasWidth = window.innerWidth;
-  canvasHeight = window.innerHeight;
-  canvas.width = canvasWidth;
-  canvas.height = canvasHeight;
-  redrawAll();
-}
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-
-// ========== DRAWING DATA ==========
-let strokes = [];        // Array of strokes: each stroke = {points: [{x,y}], color}
-let currentStroke = null;
-let currentColor = "#00ffff";  // default cyan
-
-// Drawing offset (for MOVE mode - moves entire drawing)
-let drawOffset = { x: 0, y: 0 };
-let isMovingDrawing = false;
-let moveStartOffset = { x: 0, y: 0 };
-let pinchStartScreen = { x: 0, y: 0 };
-
-// ========== GESTURE STATE ==========
-let currentMode = "IDLE";  // IDLE, DRAW, PAUSE, MOVE
-
-// Interaction box (drawing zone)
-const drawZone = {
-  x: canvasWidth / 2 - 150,
-  y: canvasHeight / 2 - 100,
-  w: 300,
-  h: 200
-};
-
-// Update zone position on resize (keep centered)
-function updateZonePosition() {
-  drawZone.x = canvasWidth / 2 - 150;
-  drawZone.y = canvasHeight / 2 - 100;
-}
-updateZonePosition();
-window.addEventListener('resize', () => {
-  updateZonePosition();
-  redrawAll();
+window.addEventListener("resize", () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
 });
 
-// Trail for visual feedback
-let fingerTrail = [];
+/* ===== STATE ===== */
+let strokes = [];
+let currentStroke = null;
+let mode = "IDLE";
 
-// ========== HELPER: MIRROR X (fix for mirrored video) ==========
-function getMirroredX(lmX, width) {
-  return (1 - lmX) * width;
+let offset = {x:0, y:0};
+let pinchStart = null;
+let offsetStart = null;
+
+/* ===== HELPERS ===== */
+function mirrorX(x) {
+  return (1 - x) * canvas.width;
 }
 
-// ========== DRAW EVERYTHING (strokes + zone + skeleton) ==========
-let currentHandLandmarks = null;
-
-function redrawAll() {
-  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-  
-  // Draw all saved strokes with offset
-  for (const stroke of strokes) {
-    if (!stroke.points || stroke.points.length === 0) continue;
-    ctx.beginPath();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = stroke.color;
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = stroke.color;
-    
-    const first = stroke.points[0];
-    ctx.moveTo(first.x + drawOffset.x, first.y + drawOffset.y);
-    for (let i = 1; i < stroke.points.length; i++) {
-      ctx.lineTo(stroke.points[i].x + drawOffset.x, stroke.points[i].y + drawOffset.y);
-    }
-    ctx.stroke();
-  }
-  ctx.shadowBlur = 0;
-  
-  // Draw drawing zone (interaction box)
-  let zoneColor = "#ffffff";
-  if (currentMode === "DRAW") zoneColor = "#44ff44";
-  else if (currentMode === "MOVE") zoneColor = "#ffaa44";
-  else if (currentMode === "PAUSE") zoneColor = "#ff4444";
-  
-  ctx.strokeStyle = zoneColor;
-  ctx.lineWidth = 3;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.strokeRect(drawZone.x, drawZone.y, drawZone.w, drawZone.h);
-  
-  // Slight fill
-  ctx.fillStyle = zoneColor + "15";
-  ctx.fillRect(drawZone.x, drawZone.y, drawZone.w, drawZone.h);
-  
-  // Draw hand skeleton if available
-  if (currentHandLandmarks) {
-    // Connections for hand skeleton
-    const connections = [
-      [0,1],[1,2],[2,3],[3,4],
-      [0,5],[5,6],[6,7],[7,8],
-      [5,9],[9,10],[10,11],[11,12],
-      [9,13],[13,14],[14,15],[15,16],
-      [13,17],[17,18],[18,19],[19,20],
-      [0,17]
-    ];
-    
-    ctx.beginPath();
-    ctx.strokeStyle = "#0ff";
-    ctx.lineWidth = 2;
-    for (const [a,b] of connections) {
-      const p1 = currentHandLandmarks[a];
-      const p2 = currentHandLandmarks[b];
-      if (p1 && p2) {
-        const x1 = getMirroredX(p1.x, canvasWidth);
-        const y1 = p1.y * canvasHeight;
-        const x2 = getMirroredX(p2.x, canvasWidth);
-        const y2 = p2.y * canvasHeight;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
-    }
-    
-    // Draw landmarks
-    for (const lm of currentHandLandmarks) {
-      const x = getMirroredX(lm.x, canvasWidth);
-      const y = lm.y * canvasHeight;
-      ctx.beginPath();
-      ctx.arc(x, y, 5, 0, 2 * Math.PI);
-      ctx.fillStyle = "#0ff";
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(x, y, 2, 0, 2 * Math.PI);
-      ctx.fillStyle = "white";
-      ctx.fill();
-    }
-    
-    // Draw finger trail
-    if (fingerTrail.length > 1) {
-      ctx.beginPath();
-      ctx.strokeStyle = "rgba(0, 255, 255, 0.4)";
-      ctx.lineWidth = 3;
-      for (let i = 0; i < fingerTrail.length - 1; i++) {
-        ctx.beginPath();
-        ctx.moveTo(fingerTrail[i].x, fingerTrail[i].y);
-        ctx.lineTo(fingerTrail[i+1].x, fingerTrail[i+1].y);
-        ctx.stroke();
-      }
-    }
-  }
+function getPos(p) {
+  return {
+    x: mirrorX(p.x),
+    y: p.y * canvas.height
+  };
 }
 
-// ========== GESTURE DETECTION (Stable) ==========
-function detectGesture(landmarks) {
-  if (!landmarks) return "IDLE";
-  
-  // Landmark indices
-  const thumbTip = landmarks[4];
-  const indexTip = landmarks[8];
-  const indexPip = landmarks[6];
-  const middleTip = landmarks[12];
-  const middlePip = landmarks[10];
-  const ringTip = landmarks[16];
-  const ringPip = landmarks[14];
-  const pinkyTip = landmarks[20];
-  const pinkyPip = landmarks[18];
-  
-  // Check which fingers are up (tip Y < pip Y)
-  const indexUp = indexTip.y < indexPip.y;
-  const middleUp = middleTip.y < middlePip.y;
-  const ringUp = ringTip.y < ringPip.y;
-  const pinkyUp = pinkyTip.y < pinkyPip.y;
-  
-  // Fist: all fingers curled
-  const fist = (!indexUp && !middleUp && !ringUp && !pinkyUp);
-  
-  // Pinch: distance between thumb tip and index tip
-  const dx = thumbTip.x - indexTip.x;
-  const dy = thumbTip.y - indexTip.y;
-  const pinchDist = Math.hypot(dx, dy);
-  const pinch = pinchDist < 0.07;
-  
-  // Index only up (drawing gesture)
-  const indexOnlyUp = indexUp && !middleUp && !ringUp && !pinkyUp;
-  
-  // Priority: PINCH > FIST > INDEX_UP
-  if (pinch && !fist) return "MOVE";
-  if (fist) return "PAUSE";
-  if (indexOnlyUp) return "DRAW";
-  
+/* ===== GESTURE ===== */
+function detect(hand) {
+  const up = (tip, pip) => hand[tip].y < hand[pip].y;
+
+  const index = up(8,6);
+  const middle = up(12,10);
+  const ring = up(16,14);
+  const pinky = up(20,18);
+
+  const dx = hand[4].x - hand[8].x;
+  const dy = hand[4].y - hand[8].y;
+  const pinch = Math.hypot(dx,dy) < 0.05;
+
+  if (pinch) return "MOVE";
+  if (!index && !middle && !ring && !pinky) return "PAUSE";
+  if (index && !middle && !ring && !pinky) return "DRAW";
+
   return "IDLE";
 }
 
-// ========== ADD POINT WITH SMOOTHING ==========
-let lastPoint = null;
+/* ===== DRAW ===== */
+function drawAll() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-function addDrawingPoint(x, y, color) {
-  if (!currentStroke) {
-    currentStroke = { points: [], color: color };
-    strokes.push(currentStroke);
-  }
-  
-  let smoothX = x;
-  let smoothY = y;
-  if (currentStroke.points.length > 0 && lastPoint) {
-    // Exponential smoothing for smoother lines
-    smoothX = lastPoint.x * 0.7 + x * 0.3;
-    smoothY = lastPoint.y * 0.7 + y * 0.3;
-  }
-  
-  currentStroke.points.push({ x: smoothX, y: smoothY });
-  lastPoint = { x: smoothX, y: smoothY };
+  strokes.forEach(s => {
+    if (s.points.length < 2) return;
+
+    ctx.beginPath();
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+
+    ctx.moveTo(s.points[0].x + offset.x, s.points[0].y + offset.y);
+
+    for (let i=1;i<s.points.length;i++) {
+      ctx.lineTo(
+        s.points[i].x + offset.x,
+        s.points[i].y + offset.y
+      );
+    }
+    ctx.stroke();
+  });
 }
 
-function finishStroke() {
-  if (currentStroke && currentStroke.points.length === 0) {
-    strokes.pop();
-  }
-  currentStroke = null;
-  lastPoint = null;
-}
-
-// ========== MOVE ENTIRE DRAWING ==========
-function startMoveDrawing(screenX, screenY) {
-  isMovingDrawing = true;
-  moveStartOffset = { ...drawOffset };
-  pinchStartScreen = { x: screenX, y: screenY };
-}
-
-function updateMoveDrawing(screenX, screenY) {
-  if (!isMovingDrawing) return;
-  const deltaX = screenX - pinchStartScreen.x;
-  const deltaY = screenY - pinchStartScreen.y;
-  drawOffset.x = moveStartOffset.x + deltaX;
-  drawOffset.y = moveStartOffset.y + deltaY;
-  redrawAll();
-}
-
-function endMoveDrawing() {
-  isMovingDrawing = false;
-}
-
-// ========== CLEAR & RESET ==========
-function clearAllDrawings() {
-  strokes = [];
-  currentStroke = null;
-  lastPoint = null;
-  redrawAll();
-}
-
-function resetView() {
-  drawOffset = { x: 0, y: 0 };
-  redrawAll();
-}
-
-// ========== MEDIAPIPE HANDS SETUP ==========
+/* ===== MEDIAPIPE ===== */
 const hands = new Hands({
-  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
 });
 
 hands.setOptions({
-  maxNumHands: 1,
-  modelComplexity: 1,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence: 0.7
+  maxNumHands:1,
+  minDetectionConfidence:0.7,
+  minTrackingConfidence:0.7
 });
 
-// Main results handler
-let gestureFrameLock = false;
+hands.onResults(res => {
+  drawAll();
 
-hands.onResults((results) => {
-  // Update hand landmarks for drawing
-  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    currentHandLandmarks = results.multiHandLandmarks[0];
-  } else {
-    currentHandLandmarks = null;
-    if (currentStroke) finishStroke();
-    currentMode = "IDLE";
-    redrawAll();
-    updateUI();
+  if (!res.multiHandLandmarks) {
+    mode = "IDLE";
+    currentStroke = null;
+    pinchStart = null;
     return;
   }
-  
-  const landmarks = currentHandLandmarks;
-  const gesture = detectGesture(landmarks);
-  
-  // Get index finger tip position (mirrored)
-  const indexTip = landmarks[8];
-  const screenX = getMirroredX(indexTip.x, canvasWidth);
-  const screenY = indexTip.y * canvasHeight;
-  
-  // Update finger trail
-  fingerTrail.push({ x: screenX, y: screenY });
-  if (fingerTrail.length > 25) fingerTrail.shift();
-  
-  // Check if inside drawing zone
-  const insideZone = (screenX > drawZone.x && screenX < drawZone.x + drawZone.w &&
-                      screenY > drawZone.y && screenY < drawZone.y + drawZone.h);
-  
-  // Drawing coordinates (relative to offset)
-  const drawX = screenX - drawOffset.x;
-  const drawY = screenY - drawOffset.y;
-  
-  // ========== GESTURE PRIORITY HANDLING ==========
-  let newMode = gesture;
-  
-  // MOVE gesture: can happen anywhere
-  if (gesture === "MOVE") {
-    if (currentMode !== "MOVE") {
-      // Start moving
-      startMoveDrawing(screenX, screenY);
-      if (currentStroke) finishStroke();
-      currentMode = "MOVE";
-    } else {
-      // Continue moving
-      updateMoveDrawing(screenX, screenY);
-    }
-  } 
-  else {
-    // Not in MOVE mode, end any active move
-    if (isMovingDrawing) endMoveDrawing();
-    
-    if (gesture === "PAUSE") {
-      if (currentMode !== "PAUSE") {
-        if (currentStroke) finishStroke();
-        currentMode = "PAUSE";
-      }
-    }
-    else if (gesture === "DRAW") {
-      if (currentMode !== "DRAW") {
-        finishStroke();
-        currentMode = "DRAW";
-      }
-      
-      // Only draw if inside the drawing zone
-      if (insideZone && currentMode === "DRAW") {
-        addDrawingPoint(drawX, drawY, currentColor);
-      } else if (!insideZone && currentStroke) {
-        // Exit zone - finish stroke
-        finishStroke();
-      }
-    }
-    else { // IDLE
-      if (currentMode !== "IDLE") {
-        if (currentStroke) finishStroke();
-        currentMode = "IDLE";
-      }
-    }
+
+  const hand = res.multiHandLandmarks[0];
+  const newMode = detect(hand);
+  const finger = getPos(hand[8]);
+
+  /* ===== MODE SWITCH FIX ===== */
+  if (mode !== newMode) {
+    if (newMode !== "DRAW") currentStroke = null;
+    if (newMode !== "MOVE") pinchStart = null;
+    mode = newMode;
   }
-  
-  // Safety: if drawing but not in DRAW mode, finish stroke
-  if (currentStroke && currentMode !== "DRAW") {
-    finishStroke();
+
+  modeText.innerText = "MODE: " + mode;
+
+  /* ===== DRAW ===== */
+  if (mode === "DRAW") {
+    if (!currentStroke) {
+      currentStroke = {points:[], color:"#00ffff"};
+      strokes.push(currentStroke);
+    }
+
+    currentStroke.points.push({
+      x: finger.x - offset.x,
+      y: finger.y - offset.y
+    });
   }
-  
-  // Update zone highlight and redraw
-  redrawAll();
-  updateUI();
+
+  /* ===== MOVE (FIXED) ===== */
+  if (mode === "MOVE") {
+    if (!pinchStart) {
+      pinchStart = {x: finger.x, y: finger.y};
+      offsetStart = {...offset};
+    }
+
+    offset.x = offsetStart.x + (finger.x - pinchStart.x);
+    offset.y = offsetStart.y + (finger.y - pinchStart.y);
+  }
 });
 
-// ========== UI UPDATE ==========
-function updateUI() {
-  const modeDisplay = document.getElementById('modeDisplay');
-  const statusText = document.getElementById('statusText');
-  
-  let modeStr = "";
-  let color = "#0ff";
-  switch(currentMode) {
-    case "DRAW": modeStr = "✍️ DRAWING"; color = "#44ff44"; break;
-    case "PAUSE": modeStr = "✊ PAUSED"; color = "#ff4444"; break;
-    case "MOVE": modeStr = "🖐️ MOVE MODE"; color = "#ffaa44"; break;
-    default: modeStr = "⚡ IDLE"; color = "#0ff";
-  }
-  
-  modeDisplay.style.color = color;
-  modeDisplay.style.borderLeftColor = color;
-  modeDisplay.innerHTML = modeStr;
-  
-  if (currentMode === "DRAW") {
-    statusText.innerHTML = `🎨 DRAWING | Color: ${currentColor} | Move finger inside box`;
-  } else if (currentMode === "MOVE") {
-    statusText.innerHTML = "🔄 MOVE MODE | Pinch and drag to reposition drawing";
-  } else if (currentMode === "PAUSE") {
-    statusText.innerHTML = "⏸️ PAUSED | Make a fist to pause drawing";
-  } else {
-    statusText.innerHTML = "✋ Raise index finger to draw | Fist to pause | Pinch to move";
-  }
-}
-
-// ========== CAMERA SETUP ==========
+/* ===== CAMERA ===== */
 const camera = new Camera(video, {
   onFrame: async () => {
-    await hands.send({ image: video });
+    await hands.send({image: video});
   },
-  width: 640,
-  height: 480
+  width:640,
+  height:480
 });
+
 camera.start();
-
-// ========== BUTTON HANDLERS ==========
-document.getElementById('clearBtn').addEventListener('click', () => {
-  clearAllDrawings();
-  const status = document.getElementById('statusText');
-  status.innerHTML = "🗑️ All drawings cleared!";
-  setTimeout(() => updateUI(), 1500);
-});
-
-document.getElementById('resetBtn').addEventListener('click', () => {
-  resetView();
-  const status = document.getElementById('statusText');
-  status.innerHTML = "⟳ View reset to center!";
-  setTimeout(() => updateUI(), 1500);
-});
-
-// Color selection
-document.querySelectorAll('.color').forEach(div => {
-  div.addEventListener('click', (e) => {
-    const color = div.getAttribute('data-color');
-    if (color) {
-      currentColor = color;
-      const status = document.getElementById('statusText');
-      status.innerHTML = `🎨 Color changed to ${color}`;
-      setTimeout(() => updateUI(), 1000);
-    }
-  });
-});
-
-// Initial redraw
-setTimeout(() => {
-  resizeCanvas();
-  redrawAll();
-  updateUI();
-}, 100);
-
-// Keep zone position on resize
-window.addEventListener('resize', () => {
-  setTimeout(() => {
-    updateZonePosition();
-    redrawAll();
-  }, 100);
-});
-
-// Performance: throttle redraws but MediaPipe already handles at camera FPS
-console.log("Gesture Drawing System Ready!");
 </script>
+
 </body>
 </html>
-```
