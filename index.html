@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Air Draw - Fixed Stable</title>
+<title>Air Draw - Working</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -37,9 +37,9 @@ canvas {
 
 <body>
 
-<video id="video" autoplay playsinline></video>
+<video id="video" autoplay playsinline muted></video>
 <canvas id="canvas"></canvas>
-<div id="mode">MODE: IDLE</div>
+<div id="mode">MODE: STARTING...</div>
 
 <script>
 const video = document.getElementById("video");
@@ -47,13 +47,12 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const modeText = document.getElementById("mode");
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-
-window.addEventListener("resize", () => {
+function resize(){
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-});
+}
+resize();
+window.addEventListener("resize", resize);
 
 /* ===== STATE ===== */
 let strokes = [];
@@ -138,6 +137,7 @@ hands.onResults(res => {
     mode = "IDLE";
     currentStroke = null;
     pinchStart = null;
+    modeText.innerText = "MODE: IDLE";
     return;
   }
 
@@ -145,7 +145,6 @@ hands.onResults(res => {
   const newMode = detect(hand);
   const finger = getPos(hand[8]);
 
-  /* ===== MODE SWITCH FIX ===== */
   if (mode !== newMode) {
     if (newMode !== "DRAW") currentStroke = null;
     if (newMode !== "MOVE") pinchStart = null;
@@ -154,7 +153,7 @@ hands.onResults(res => {
 
   modeText.innerText = "MODE: " + mode;
 
-  /* ===== DRAW ===== */
+  /* DRAW */
   if (mode === "DRAW") {
     if (!currentStroke) {
       currentStroke = {points:[], color:"#00ffff"};
@@ -167,7 +166,7 @@ hands.onResults(res => {
     });
   }
 
-  /* ===== MOVE (FIXED) ===== */
+  /* MOVE */
   if (mode === "MOVE") {
     if (!pinchStart) {
       pinchStart = {x: finger.x, y: finger.y};
@@ -179,7 +178,7 @@ hands.onResults(res => {
   }
 });
 
-/* ===== CAMERA ===== */
+/* ===== CAMERA (FIXED) ===== */
 const camera = new Camera(video, {
   onFrame: async () => {
     await hands.send({image: video});
@@ -188,7 +187,9 @@ const camera = new Camera(video, {
   height:480
 });
 
-camera.start();
+camera.start().catch(e => {
+  alert("Camera error: " + e);
+});
 </script>
 
 </body>
