@@ -3,321 +3,618 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AIR DRAW \u2014 Gesture System</title>
+<title>Gesture Drawing - Air Canvas</title>
 
+<!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <style>
-  /* \u2500\u2500 Reset & Base \u2500\u2500 */
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
+}
 
-  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #000;
+}
 
-  :root {
-    --cyan:    #00f5ff;
-    --green:   #39ff14;
-    --yellow:  #ffe600;
-    --red:     #ff3a5c;
-    --purple:  #c77dff;
-    --bg:      #050a0f;
-    --panel:   rgba(0, 245, 255, 0.06);
-    --border:  rgba(0, 245, 255, 0.22);
-  }
+video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
 
-  body {
-    background: var(--bg);
-    overflow: hidden;
-    font-family: 'Share Tech Mono', monospace;
-    color: var(--cyan);
-  }
+canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
 
-  /* \u2500\u2500 Video feed (mirrored) \u2500\u2500 */
-  #video {
-    position: absolute;
-    width: 100%; height: 100%;
-    object-fit: cover;
-    transform: scaleX(-1);
-    opacity: 0.35;          /* dim so drawing pops */
-  }
+/* Simple UI - minimal but functional */
+#modeDisplay {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(0,0,0,0.7);
+  color: #0ff;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: bold;
+  font-family: monospace;
+  z-index: 100;
+  border-left: 3px solid #0ff;
+}
 
-  /* \u2500\u2500 Drawing canvas (full screen) \u2500\u2500 */
-  #canvas {
-    position: absolute;
-    top: 0; left: 0;
-  }
+#statusText {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(0,0,0,0.6);
+  color: #ccc;
+  padding: 8px 15px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: monospace;
+  z-index: 100;
+}
 
-  /* \u2500\u2500 HUD panels \u2500\u2500 */
-  .hud {
-    position: absolute;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    backdrop-filter: blur(12px);
-    padding: 10px 16px;
-    pointer-events: none;
-    font-family: 'Orbitron', sans-serif;
-  }
+.controls {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  gap: 12px;
+  z-index: 100;
+}
 
-  /* Top-left title */
-  #hud-title {
-    top: 18px; left: 18px;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 3px;
-    color: var(--cyan);
-    text-shadow: 0 0 10px var(--cyan);
-  }
-  #hud-title span { opacity: 0.5; font-weight: 400; font-size: 10px; display: block; margin-top: 2px; }
+button {
+  background: rgba(0,0,0,0.7);
+  border: 1px solid #0ff;
+  color: #0ff;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: 0.2s;
+}
 
-  /* Mode badge \u2014 top-centre */
-  #hud-mode {
-    top: 18px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 18px;
-    font-weight: 900;
-    letter-spacing: 6px;
-    padding: 10px 28px;
-    transition: color 0.2s, border-color 0.2s, text-shadow 0.2s, box-shadow 0.2s;
-  }
+button:hover {
+  background: #0ff;
+  color: #000;
+}
 
-  /* Top-right controls */
-  #hud-controls {
-    top: 18px; right: 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    pointer-events: auto;
-  }
-  .ctrl-btn {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    backdrop-filter: blur(12px);
-    color: var(--cyan);
-    font-family: 'Orbitron', sans-serif;
-    font-size: 11px;
-    letter-spacing: 2px;
-    padding: 8px 16px;
-    cursor: pointer;
-    transition: background 0.2s, box-shadow 0.2s, color 0.2s;
-  }
-  .ctrl-btn:hover { background: rgba(0,245,255,0.12); box-shadow: 0 0 14px rgba(0,245,255,0.4); }
-  #btn-clear { border-color: var(--red);    color: var(--red); }
-  #btn-clear:hover { background: rgba(255,58,92,0.12); box-shadow: 0 0 14px rgba(255,58,92,0.4); }
-  #btn-color { border-color: var(--purple); color: var(--purple); }
-  #btn-color:hover { background: rgba(199,125,255,0.12); box-shadow: 0 0 14px rgba(199,125,255,0.4); }
+.color-palette {
+  position: absolute;
+  top: 100px;
+  left: 20px;
+  background: rgba(0,0,0,0.6);
+  padding: 10px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 100;
+}
 
-  /* Color palette \u2014 left side */
-  #hud-palette {
-    top: 50%;
-    left: 18px;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    align-items: center;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px 10px;
-    pointer-events: auto;
-  }
-  .pal-dot {
-    width: 22px; height: 22px;
-    border-radius: 50%;
-    cursor: pointer;
-    border: 2px solid transparent;
-    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
-  }
-  .pal-dot:hover, .pal-dot.active {
-    transform: scale(1.35);
-    box-shadow: 0 0 10px currentColor;
-  }
-  .pal-dot.active { border-color: white; }
+.color {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.3);
+  transition: transform 0.1s;
+}
 
-  /* Bottom-left status strip */
-  #hud-status {
-    bottom: 18px; left: 18px;
-    font-size: 11px;
-    line-height: 1.8;
-    opacity: 0.7;
-    color: var(--cyan);
-  }
+.color:hover {
+  transform: scale(1.15);
+  border-color: white;
+}
 
-  /* Gesture legend \u2014 bottom-right */
-  #hud-legend {
-    bottom: 18px; right: 18px;
-    font-size: 10px;
-    line-height: 2;
-    text-align: right;
-    opacity: 0.6;
-  }
-  #hud-legend b { color: white; opacity: 1; }
-
-  /* Crosshair ring around fingertip */
-  #cursor-ring {
-    position: absolute;
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    border: 2px solid var(--cyan);
-    box-shadow: 0 0 10px var(--cyan), inset 0 0 6px rgba(0,245,255,0.3);
-    pointer-events: none;
-    transform: translate(-50%, -50%);
-    transition: border-color 0.15s, box-shadow 0.15s, width 0.1s, height 0.1s;
-  }
+/* Interaction box */
+#boxHint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255,255,255,0.3);
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 50;
+  text-align: center;
+}
 </style>
 </head>
-
 <body>
 
-<!-- \u2500\u2500 Video + Canvas \u2500\u2500 -->
 <video id="video" autoplay playsinline muted></video>
 <canvas id="canvas"></canvas>
 
-<!-- \u2500\u2500 Fingertip cursor ring \u2500\u2500 -->
-<div id="cursor-ring"></div>
-
-<!-- \u2500\u2500 HUD \u2500\u2500 -->
-<div id="hud-title" class="hud">
-  AIR DRAW
-  <span>GESTURE SYSTEM v2</span>
+<div id="modeDisplay">⚡ IDLE</div>
+<div id="statusText">✋ Show hand to begin</div>
+<div class="color-palette">
+  <div class="color" style="background: #00ffff;" data-color="#00ffff"></div>
+  <div class="color" style="background: #ff4444;" data-color="#ff4444"></div>
+  <div class="color" style="background: #44ff44;" data-color="#44ff44"></div>
+  <div class="color" style="background: #ffff44;" data-color="#ffff44"></div>
+  <div class="color" style="background: #ff44ff;" data-color="#ff44ff"></div>
 </div>
-
-<div id="hud-mode" class="hud">IDLE</div>
-
-<div id="hud-controls">
-  <button class="ctrl-btn" id="btn-clear">\u232b CLEAR</button>
-  <button class="ctrl-btn" id="btn-color">\u25c8 COLOR</button>
+<div class="controls">
+  <button id="clearBtn">🗑️ CLEAR</button>
+  <button id="resetBtn">⟳ RESET VIEW</button>
 </div>
-
-<div id="hud-palette">
-  <!-- dots injected by JS -->
-</div>
-
-<div id="hud-status" class="hud">
-  FPS: <span id="fps">--</span><br>
-  STROKES: <span id="stroke-count">0</span><br>
-  HAND: <span id="hand-state">NONE</span>
-</div>
-
-<div id="hud-legend" class="hud">
-  <b>\u261d\ufe0f INDEX UP</b> \u2192 DRAW<br>
-  <b>\u270a FIST</b> \u2192 PAUSE<br>
-  <b>\ud83e\udd0f PINCH</b> \u2192 MOVE ALL<br>
-</div>
-
+<div id="boxHint">◻️ DRAWING ZONE</div>
 
 <script>
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   SECTION 1 \u2014 DOM references & canvas setup
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
-const video      = document.getElementById('video');
-const canvas     = document.getElementById('canvas');
-const ctx        = canvas.getContext('2d');
-const modeEl     = document.getElementById('hud-mode');
-const fpsEl      = document.getElementById('fps');
-const strokeEl   = document.getElementById('stroke-count');
-const handEl     = document.getElementById('hand-state');
-const cursorRing = document.getElementById('cursor-ring');
-const paletteEl  = document.getElementById('hud-palette');
+// ============================================
+// ADVANCED GESTURE DRAWING SYSTEM
+// Gestures: ☝️ Index = DRAW | ✊ Fist = PAUSE | 🤏 Pinch = MOVE
+// ============================================
 
-function resize() {
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let canvasWidth = window.innerWidth;
+let canvasHeight = window.innerHeight;
+
+function resizeCanvas() {
+  canvasWidth = window.innerWidth;
+  canvasHeight = window.innerHeight;
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+  redrawAll();
 }
-resize();
-window.addEventListener('resize', resize);
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
+// ========== DRAWING DATA ==========
+let strokes = [];        // Array of strokes: each stroke = {points: [{x,y}], color}
+let currentStroke = null;
+let currentColor = "#00ffff";  // default cyan
 
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   SECTION 2 \u2014 Color palette
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
-const COLORS = [
-  { hex: '#00f5ff', label: 'CYAN'   },
-  { hex: '#39ff14', label: 'GREEN'  },
-  { hex: '#ffe600', label: 'YELLOW' },
-  { hex: '#ff3a5c', label: 'RED'    },
-  { hex: '#c77dff', label: 'PURPLE' },
-  { hex: '#ffffff', label: 'WHITE'  },
-];
-let activeColor = COLORS[0].hex;
+// Drawing offset (for MOVE mode - moves entire drawing)
+let drawOffset = { x: 0, y: 0 };
+let isMovingDrawing = false;
+let moveStartOffset = { x: 0, y: 0 };
+let pinchStartScreen = { x: 0, y: 0 };
 
-COLORS.forEach((c, i) => {
-  const dot = document.createElement('div');
-  dot.className = 'pal-dot' + (i === 0 ? ' active' : '');
-  dot.style.background = c.hex;
-  dot.style.color = c.hex;
-  dot.title = c.label;
-  dot.addEventListener('click', () => {
-    document.querySelectorAll('.pal-dot').forEach(d => d.classList.remove('active'));
-    dot.classList.add('active');
-    activeColor = c.hex;
-    currentStroke = null; // start fresh stroke
-  });
-  paletteEl.appendChild(dot);
+// ========== GESTURE STATE ==========
+let currentMode = "IDLE";  // IDLE, DRAW, PAUSE, MOVE
+
+// Interaction box (drawing zone)
+const drawZone = {
+  x: canvasWidth / 2 - 150,
+  y: canvasHeight / 2 - 100,
+  w: 300,
+  h: 200
+};
+
+// Update zone position on resize (keep centered)
+function updateZonePosition() {
+  drawZone.x = canvasWidth / 2 - 150;
+  drawZone.y = canvasHeight / 2 - 100;
+}
+updateZonePosition();
+window.addEventListener('resize', () => {
+  updateZonePosition();
+  redrawAll();
 });
 
-document.getElementById('btn-color').addEventListener('click', () => {
-  const next = (COLORS.findIndex(c => c.hex === activeColor) + 1) % COLORS.length;
-  paletteEl.querySelectorAll('.pal-dot')[next].click();
-});
+// Trail for visual feedback
+let fingerTrail = [];
 
-document.getElementById('btn-clear').addEventListener('click', () => {
+// ========== HELPER: MIRROR X (fix for mirrored video) ==========
+function getMirroredX(lmX, width) {
+  return (1 - lmX) * width;
+}
+
+// ========== DRAW EVERYTHING (strokes + zone + skeleton) ==========
+let currentHandLandmarks = null;
+
+function redrawAll() {
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+  
+  // Draw all saved strokes with offset
+  for (const stroke of strokes) {
+    if (!stroke.points || stroke.points.length === 0) continue;
+    ctx.beginPath();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = stroke.color;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = stroke.color;
+    
+    const first = stroke.points[0];
+    ctx.moveTo(first.x + drawOffset.x, first.y + drawOffset.y);
+    for (let i = 1; i < stroke.points.length; i++) {
+      ctx.lineTo(stroke.points[i].x + drawOffset.x, stroke.points[i].y + drawOffset.y);
+    }
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  
+  // Draw drawing zone (interaction box)
+  let zoneColor = "#ffffff";
+  if (currentMode === "DRAW") zoneColor = "#44ff44";
+  else if (currentMode === "MOVE") zoneColor = "#ffaa44";
+  else if (currentMode === "PAUSE") zoneColor = "#ff4444";
+  
+  ctx.strokeStyle = zoneColor;
+  ctx.lineWidth = 3;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.strokeRect(drawZone.x, drawZone.y, drawZone.w, drawZone.h);
+  
+  // Slight fill
+  ctx.fillStyle = zoneColor + "15";
+  ctx.fillRect(drawZone.x, drawZone.y, drawZone.w, drawZone.h);
+  
+  // Draw hand skeleton if available
+  if (currentHandLandmarks) {
+    // Connections for hand skeleton
+    const connections = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [5,9],[9,10],[10,11],[11,12],
+      [9,13],[13,14],[14,15],[15,16],
+      [13,17],[17,18],[18,19],[19,20],
+      [0,17]
+    ];
+    
+    ctx.beginPath();
+    ctx.strokeStyle = "#0ff";
+    ctx.lineWidth = 2;
+    for (const [a,b] of connections) {
+      const p1 = currentHandLandmarks[a];
+      const p2 = currentHandLandmarks[b];
+      if (p1 && p2) {
+        const x1 = getMirroredX(p1.x, canvasWidth);
+        const y1 = p1.y * canvasHeight;
+        const x2 = getMirroredX(p2.x, canvasWidth);
+        const y2 = p2.y * canvasHeight;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    }
+    
+    // Draw landmarks
+    for (const lm of currentHandLandmarks) {
+      const x = getMirroredX(lm.x, canvasWidth);
+      const y = lm.y * canvasHeight;
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, 2 * Math.PI);
+      ctx.fillStyle = "#0ff";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, 2 * Math.PI);
+      ctx.fillStyle = "white";
+      ctx.fill();
+    }
+    
+    // Draw finger trail
+    if (fingerTrail.length > 1) {
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(0, 255, 255, 0.4)";
+      ctx.lineWidth = 3;
+      for (let i = 0; i < fingerTrail.length - 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(fingerTrail[i].x, fingerTrail[i].y);
+        ctx.lineTo(fingerTrail[i+1].x, fingerTrail[i+1].y);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+// ========== GESTURE DETECTION (Stable) ==========
+function detectGesture(landmarks) {
+  if (!landmarks) return "IDLE";
+  
+  // Landmark indices
+  const thumbTip = landmarks[4];
+  const indexTip = landmarks[8];
+  const indexPip = landmarks[6];
+  const middleTip = landmarks[12];
+  const middlePip = landmarks[10];
+  const ringTip = landmarks[16];
+  const ringPip = landmarks[14];
+  const pinkyTip = landmarks[20];
+  const pinkyPip = landmarks[18];
+  
+  // Check which fingers are up (tip Y < pip Y)
+  const indexUp = indexTip.y < indexPip.y;
+  const middleUp = middleTip.y < middlePip.y;
+  const ringUp = ringTip.y < ringPip.y;
+  const pinkyUp = pinkyTip.y < pinkyPip.y;
+  
+  // Fist: all fingers curled
+  const fist = (!indexUp && !middleUp && !ringUp && !pinkyUp);
+  
+  // Pinch: distance between thumb tip and index tip
+  const dx = thumbTip.x - indexTip.x;
+  const dy = thumbTip.y - indexTip.y;
+  const pinchDist = Math.hypot(dx, dy);
+  const pinch = pinchDist < 0.07;
+  
+  // Index only up (drawing gesture)
+  const indexOnlyUp = indexUp && !middleUp && !ringUp && !pinkyUp;
+  
+  // Priority: PINCH > FIST > INDEX_UP
+  if (pinch && !fist) return "MOVE";
+  if (fist) return "PAUSE";
+  if (indexOnlyUp) return "DRAW";
+  
+  return "IDLE";
+}
+
+// ========== ADD POINT WITH SMOOTHING ==========
+let lastPoint = null;
+
+function addDrawingPoint(x, y, color) {
+  if (!currentStroke) {
+    currentStroke = { points: [], color: color };
+    strokes.push(currentStroke);
+  }
+  
+  let smoothX = x;
+  let smoothY = y;
+  if (currentStroke.points.length > 0 && lastPoint) {
+    // Exponential smoothing for smoother lines
+    smoothX = lastPoint.x * 0.7 + x * 0.3;
+    smoothY = lastPoint.y * 0.7 + y * 0.3;
+  }
+  
+  currentStroke.points.push({ x: smoothX, y: smoothY });
+  lastPoint = { x: smoothX, y: smoothY };
+}
+
+function finishStroke() {
+  if (currentStroke && currentStroke.points.length === 0) {
+    strokes.pop();
+  }
+  currentStroke = null;
+  lastPoint = null;
+}
+
+// ========== MOVE ENTIRE DRAWING ==========
+function startMoveDrawing(screenX, screenY) {
+  isMovingDrawing = true;
+  moveStartOffset = { ...drawOffset };
+  pinchStartScreen = { x: screenX, y: screenY };
+}
+
+function updateMoveDrawing(screenX, screenY) {
+  if (!isMovingDrawing) return;
+  const deltaX = screenX - pinchStartScreen.x;
+  const deltaY = screenY - pinchStartScreen.y;
+  drawOffset.x = moveStartOffset.x + deltaX;
+  drawOffset.y = moveStartOffset.y + deltaY;
+  redrawAll();
+}
+
+function endMoveDrawing() {
+  isMovingDrawing = false;
+}
+
+// ========== CLEAR & RESET ==========
+function clearAllDrawings() {
   strokes = [];
-  offsetX = 0;
-  offsetY = 0;
-  strokeEl.textContent = '0';
+  currentStroke = null;
+  lastPoint = null;
+  redrawAll();
+}
+
+function resetView() {
+  drawOffset = { x: 0, y: 0 };
+  redrawAll();
+}
+
+// ========== MEDIAPIPE HANDS SETUP ==========
+const hands = new Hands({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 });
 
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7
+});
 
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   SECTION 3 \u2014 Drawing state
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
-let strokes      = [];   // array of {color, pts:[{x,y}]}
-let currentStroke = null; // stroke being drawn now
+// Main results handler
+let gestureFrameLock = false;
 
-// Global canvas offset (moved by pinch gesture)
-let offsetX = 0;
-let offsetY = 0;
+hands.onResults((results) => {
+  // Update hand landmarks for drawing
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    currentHandLandmarks = results.multiHandLandmarks[0];
+  } else {
+    currentHandLandmarks = null;
+    if (currentStroke) finishStroke();
+    currentMode = "IDLE";
+    redrawAll();
+    updateUI();
+    return;
+  }
+  
+  const landmarks = currentHandLandmarks;
+  const gesture = detectGesture(landmarks);
+  
+  // Get index finger tip position (mirrored)
+  const indexTip = landmarks[8];
+  const screenX = getMirroredX(indexTip.x, canvasWidth);
+  const screenY = indexTip.y * canvasHeight;
+  
+  // Update finger trail
+  fingerTrail.push({ x: screenX, y: screenY });
+  if (fingerTrail.length > 25) fingerTrail.shift();
+  
+  // Check if inside drawing zone
+  const insideZone = (screenX > drawZone.x && screenX < drawZone.x + drawZone.w &&
+                      screenY > drawZone.y && screenY < drawZone.y + drawZone.h);
+  
+  // Drawing coordinates (relative to offset)
+  const drawX = screenX - drawOffset.x;
+  const drawY = screenY - drawOffset.y;
+  
+  // ========== GESTURE PRIORITY HANDLING ==========
+  let newMode = gesture;
+  
+  // MOVE gesture: can happen anywhere
+  if (gesture === "MOVE") {
+    if (currentMode !== "MOVE") {
+      // Start moving
+      startMoveDrawing(screenX, screenY);
+      if (currentStroke) finishStroke();
+      currentMode = "MOVE";
+    } else {
+      // Continue moving
+      updateMoveDrawing(screenX, screenY);
+    }
+  } 
+  else {
+    // Not in MOVE mode, end any active move
+    if (isMovingDrawing) endMoveDrawing();
+    
+    if (gesture === "PAUSE") {
+      if (currentMode !== "PAUSE") {
+        if (currentStroke) finishStroke();
+        currentMode = "PAUSE";
+      }
+    }
+    else if (gesture === "DRAW") {
+      if (currentMode !== "DRAW") {
+        finishStroke();
+        currentMode = "DRAW";
+      }
+      
+      // Only draw if inside the drawing zone
+      if (insideZone && currentMode === "DRAW") {
+        addDrawingPoint(drawX, drawY, currentColor);
+      } else if (!insideZone && currentStroke) {
+        // Exit zone - finish stroke
+        finishStroke();
+      }
+    }
+    else { // IDLE
+      if (currentMode !== "IDLE") {
+        if (currentStroke) finishStroke();
+        currentMode = "IDLE";
+      }
+    }
+  }
+  
+  // Safety: if drawing but not in DRAW mode, finish stroke
+  if (currentStroke && currentMode !== "DRAW") {
+    finishStroke();
+  }
+  
+  // Update zone highlight and redraw
+  redrawAll();
+  updateUI();
+});
 
-// Smoothed finger position
-let smoothX = 0;
-let smoothY = 0;
-const SMOOTH = 0.65; // 0 = instant, 1 = heavy lag
-
-// Finger trail for visual effect
-let trail = [];
-const TRAIL_LEN = 28;
-
-// Pinch anchor: where the pinch started (in screen coords) and what offset was at that time
-let pinchAnchorFinger = null; // {x, y}
-let pinchAnchorOffset = null; // {x, y}
-
-
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   SECTION 4 \u2014 Gesture detection helpers
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
-function dist(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+// ========== UI UPDATE ==========
+function updateUI() {
+  const modeDisplay = document.getElementById('modeDisplay');
+  const statusText = document.getElementById('statusText');
+  
+  let modeStr = "";
+  let color = "#0ff";
+  switch(currentMode) {
+    case "DRAW": modeStr = "✍️ DRAWING"; color = "#44ff44"; break;
+    case "PAUSE": modeStr = "✊ PAUSED"; color = "#ff4444"; break;
+    case "MOVE": modeStr = "🖐️ MOVE MODE"; color = "#ffaa44"; break;
+    default: modeStr = "⚡ IDLE"; color = "#0ff";
+  }
+  
+  modeDisplay.style.color = color;
+  modeDisplay.style.borderLeftColor = color;
+  modeDisplay.innerHTML = modeStr;
+  
+  if (currentMode === "DRAW") {
+    statusText.innerHTML = `🎨 DRAWING | Color: ${currentColor} | Move finger inside box`;
+  } else if (currentMode === "MOVE") {
+    statusText.innerHTML = "🔄 MOVE MODE | Pinch and drag to reposition drawing";
+  } else if (currentMode === "PAUSE") {
+    statusText.innerHTML = "⏸️ PAUSED | Make a fist to pause drawing";
+  } else {
+    statusText.innerHTML = "✋ Raise index finger to draw | Fist to pause | Pinch to move";
+  }
 }
 
-function detectGesture(hand) {
-  const indexUp  = hand[8].y  < hand[6].y;
-  const middleUp = hand[12].y < hand[10].y;
-  const ringUp   = hand[16].y < hand[14].y;
-  const pinkyUp  = hand[20].y < hand[18].y;
-  const pinch    = dist(hand[4], hand[8]) < 0.07;
+// ========== CAMERA SETUP ==========
+const camera = new Camera(video, {
+  onFrame: async () => {
+    await hands.send({ image: video });
+  },
+  width: 640,
+  height: 480
+});
+camera.start();
 
-  // Priority: PINCH > FIST > DRAW
-  if (pinch)                                   return 'MOVE';
-  if (!indexUp && !middleUp && !ringUp && !pinkyUp) return 'PAUSE';
-  if (indexUp  && !middleUp && !ringUp && !pinkyUp) return 'DRAW';
-  return 'IDLE';
-}
+// ========== BUTTON HANDLERS ==========
+document.getElementById('clearBtn').addEventListener('click', () => {
+  clearAllDrawings();
+  const status = document.getElementById('statusText');
+  status.innerHTML = "🗑️ All drawings cleared!";
+  setTimeout(() => updateUI(), 1500);
+});
 
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   SECTION 5 \u2014 Interaction box
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
-const box = { x: 200, y: 200, w: 220, h: 150, active
+document.getElementById('resetBtn').addEventListener('click', () => {
+  resetView();
+  const status = document.getElementById('statusText');
+  status.innerHTML = "⟳ View reset to center!";
+  setTimeout(() => updateUI(), 1500);
+});
+
+// Color selection
+document.querySelectorAll('.color').forEach(div => {
+  div.addEventListener('click', (e) => {
+    const color = div.getAttribute('data-color');
+    if (color) {
+      currentColor = color;
+      const status = document.getElementById('statusText');
+      status.innerHTML = `🎨 Color changed to ${color}`;
+      setTimeout(() => updateUI(), 1000);
+    }
+  });
+});
+
+// Initial redraw
+setTimeout(() => {
+  resizeCanvas();
+  redrawAll();
+  updateUI();
+}, 100);
+
+// Keep zone position on resize
+window.addEventListener('resize', () => {
+  setTimeout(() => {
+    updateZonePosition();
+    redrawAll();
+  }, 100);
+});
+
+// Performance: throttle redraws but MediaPipe already handles at camera FPS
+console.log("Gesture Drawing System Ready!");
+</script>
+</body>
+</html>
+```
