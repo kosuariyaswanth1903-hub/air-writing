@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hand Track UI</title>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<style>
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+  background: black;
+}
+
+/* Video */
+video {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* mirror */
+}
+
+/* Canvas */
+canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* UI Panels */
+.panel {
+  position: absolute;
+  padding: 10px 15px;
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  background: rgba(0,0,0,0.4);
+  color: #0ff;
+  border: 1px solid rgba(0,255,255,0.3);
+}
+
+/* Top Left Panel */
+#title {
+  top: 20px;
+  left: 20px;
+  font-weight: bold;
+}
+
+/* Right Buttons */
+.button {
+  position: absolute;
+  right: 20px;
+  padding: 10px 15px;
+  border-radius: 8px;
+  border: 1px solid;
+  cursor: pointer;
+}
+
+#btn1 { top: 80px; border-color: #a855f7; color: #a855f7; }
+#btn2 { top: 140px; border-color: #22c55e; color: #22c55e; }
+
+/* Color Palette */
+.palette {
+  position: absolute;
+  left: 20px;
+  top: 100px;
+}
+.color {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  margin: 10px 0;
+}
+
+/* Status Text */
+#status {
+  position: absolute;
+  top: 200px;
+  left: 220px;
+  color: white;
+  font-size: 18px;
+}
+</style>
+</head>
+
+<body>
+
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+
+<div id="title" class="panel">HAND TRACK SYSTEM</div>
+
+<div id="btn1" class="button">PLAN</div>
+<div id="btn2" class="button">RUN</div>
+
+<div class="palette">
+  <div class="color" style="background:#ff4d4d"></div>
+  <div class="color" style="background:#00ffff"></div>
+  <div class="color" style="background:#ffffff"></div>
+  <div class="color" style="background:#22c55e"></div>
+</div>
+
+<div id="status">IDLE</div>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+/* Interaction Box */
+const box = {
+  x: 200,
+  y: 200,
+  w: 220,
+  h: 150,
+  active: false
+};
+
+/* MediaPipe Setup */
+const hands = new Hands({
+  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7
+});
+
+/* Draw Connections */
+const connections = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+/* Finger Trail */
+let trail = [];
+
+hands.onResults(results => {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  /* Draw Box */
+  ctx.strokeStyle = box.active ? "#22c55e" : "white";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(box.x, box.y, box.w, box.h);
+
+  if (results.multiHandLandmarks) {
+    results.multiHandLandmarks.forEach(hand => {
+
+      /* Draw Skeleton */
+      ctx.strokeStyle = "cyan";
+      ctx.lineWidth = 2;
+
+      connections.forEach(([a,b]) => {
+        ctx.beginPath();
+        ctx.moveTo(hand[a].x * canvas.width, hand[a].y * canvas.height);
+        ctx.lineTo(hand[b].x * canvas.width, hand[b].y * canvas.height);
+        ctx.stroke();
+      });
+
+      /* Draw Points */
+      hand.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, 2*Math.PI);
+        ctx.fillStyle = "cyan";
+        ctx.fill();
+      });
+
+      /* Index Finger */
+      const x = hand[8].x * canvas.width;
+      const y = hand[8].y * canvas.height;
+
+      /* Trail */
+      trail.push({x,y});
+      if (trail.length > 20) trail.shift();
+
+      ctx.strokeStyle = "rgba(0,255,255,0.5)";
+      ctx.beginPath();
+      trail.forEach((p,i)=>{
+        if(i===0) ctx.moveTo(p.x,p.y);
+        else ctx.lineTo(p.x,p.y);
+      });
+      ctx.stroke();
+
+      /* Box Detection */
+      if (x > box.x && x < box.x + box.w &&
+          y > box.y && y < box.y + box.h) {
+        box.active = true;
+        document.getElementById("status").innerText = "ACTIVE";
+      } else {
+        box.active = false;
+        document.getElementById("status").innerText = "IDLE";
+      }
+    });
+  }
+});
+
+/* Camera */
+const camera = new Camera(video, {
+  onFrame: async () => {
+    await hands.send({image: video});
+  },
+  width: 640,
+  height: 480
+});
+camera.start();
+</script>
+
+</body>
+</html>
