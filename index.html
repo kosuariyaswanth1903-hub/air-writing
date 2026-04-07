@@ -3,194 +3,328 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Air Draw - Working</title>
-
+<title>Air Draw</title>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
 <style>
-body { margin:0; overflow:hidden; background:black; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { overflow:hidden; background:#000; font-family:monospace; }
 
 video {
-  position:absolute;
-  width:100%;
-  height:100%;
+  position:fixed; inset:0;
+  width:100%; height:100%;
   object-fit:cover;
-  transform: scaleX(-1);
+  transform:scaleX(-1);
+  opacity:0.35;
+  z-index:0;
 }
 
 canvas {
-  position:absolute;
-  top:0;
-  left:0;
+  position:fixed; inset:0;
+  width:100%; height:100%;
+  z-index:1;
 }
 
+#ui {
+  position:fixed; inset:0;
+  z-index:2;
+  pointer-events:none;
+}
+
+/* Mode */
 #mode {
   position:absolute;
-  top:20px;
-  left:20px;
-  color:white;
-  font-size:20px;
+  top:16px; left:50%; transform:translateX(-50%);
+  font-size:14px; font-weight:bold; letter-spacing:4px;
+  padding:8px 22px; border-radius:8px;
+  border:1px solid #00ffff; color:#00ffff;
+  background:rgba(0,0,0,0.7);
+  text-shadow:0 0 10px #00ffff;
+  transition:color .1s, border-color .1s, text-shadow .1s;
+  white-space:nowrap;
 }
+
+/* Status */
+#status {
+  position:absolute;
+  bottom:16px; left:16px;
+  font-size:12px; color:rgba(0,255,255,0.6);
+  line-height:1.8;
+}
+
+/* Palette */
+#palette {
+  position:absolute;
+  top:50%; left:14px; transform:translateY(-50%);
+  display:flex; flex-direction:column; gap:8px;
+  pointer-events:auto;
+}
+.sw {
+  width:28px; height:28px; border-radius:50%;
+  border:2px solid rgba(255,255,255,0.3); cursor:pointer;
+  transition:transform .12s, box-shadow .12s;
+}
+.sw:hover { transform:scale(1.2); }
+.sw.on { border-color:#fff; transform:scale(1.28); box-shadow:0 0 10px currentColor; }
+
+/* Buttons */
+#btns {
+  position:absolute;
+  bottom:16px; right:16px;
+  display:flex; gap:8px;
+  pointer-events:auto;
+}
+.btn {
+  font-family:monospace; font-size:12px; font-weight:bold;
+  padding:8px 16px; border-radius:6px; cursor:pointer;
+  background:rgba(0,0,0,0.8); backdrop-filter:blur(8px);
+}
+#btn-undo  { border:1px solid #ff8c00; color:#ff8c00; }
+#btn-clear { border:1px solid #ff3a5c; color:#ff3a5c; }
 </style>
 </head>
-
 <body>
 
 <video id="video" autoplay playsinline muted></video>
 <canvas id="canvas"></canvas>
-<div id="mode">MODE: STARTING...</div>
+
+<div id="ui">
+  <div id="mode">⬡ IDLE</div>
+  <div id="status">📷 Starting camera...</div>
+  <div id="palette"></div>
+  <div id="btns">
+    <button class="btn" id="btn-undo">↩ UNDO</button>
+    <button class="btn" id="btn-clear">⌫ CLEAR</button>
+  </div>
+</div>
 
 <script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const modeText = document.getElementById("mode");
+/* ── DOM ── */
+const video    = document.getElementById('video');
+const canvas   = document.getElementById('canvas');
+const ctx      = canvas.getContext('2d');
+const modeEl   = document.getElementById('mode');
+const statusEl = document.getElementById('status');
 
-function resize(){
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
+function resize() { canvas.width = innerWidth; canvas.height = innerHeight; }
 resize();
-window.addEventListener("resize", resize);
+window.addEventListener('resize', resize);
 
-/* ===== STATE ===== */
-let strokes = [];
-let currentStroke = null;
-let mode = "IDLE";
-
-let offset = {x:0, y:0};
-let pinchStart = null;
-let offsetStart = null;
-
-/* ===== HELPERS ===== */
-function mirrorX(x) {
-  return (1 - x) * canvas.width;
-}
-
-function getPos(p) {
-  return {
-    x: mirrorX(p.x),
-    y: p.y * canvas.height
+/* ── Palette ── */
+const COLORS = ['#00ffff','#ff3a5c','#39ff14','#ffe600','#ff8c00','#c77dff','#ffffff'];
+let penColor = COLORS[0];
+const palEl = document.getElementById('palette');
+COLORS.forEach((c,i) => {
+  const sw = document.createElement('div');
+  sw.className = 'sw' + (i===0?' on':'');
+  sw.style.cssText = `background:${c};color:${c}`;
+  sw.onclick = () => {
+    document.querySelectorAll('.sw').forEach(s=>s.classList.remove('on'));
+    sw.classList.add('on');
+    penColor = c;
+    curStroke = null;
   };
+  palEl.appendChild(sw);
+});
+
+/* ── Drawing state ── */
+let strokes   = [];
+let curStroke = null;
+let offX = 0, offY = 0;
+let pAnchorFX = null, pAnchorFY = null, pAnchorOX = 0, pAnchorOY = 0;
+let sX = 0, sY = 0;
+const SMOOTH = 0.5;
+
+/* ── Helpers ── */
+function fx(lx) { return (1 - lx) * canvas.width; }
+function fy(ly) { return ly * canvas.height; }
+
+/* ── Gesture ── */
+function gesture(h) {
+  const iUp = h[8].y  < h[6].y;
+  const mUp = h[12].y < h[10].y;
+  const rUp = h[16].y < h[14].y;
+  const pUp = h[20].y < h[18].y;
+  const pinch = Math.hypot(h[4].x-h[8].x, h[4].y-h[8].y) < 0.06;
+  if (pinch)                        return 'MOVE';
+  if (!iUp && !mUp && !rUp && !pUp) return 'PAUSE';
+  if (iUp  && !mUp && !rUp && !pUp) return 'DRAW';
+  return 'IDLE';
 }
 
-/* ===== GESTURE ===== */
-function detect(hand) {
-  const up = (tip, pip) => hand[tip].y < hand[pip].y;
-
-  const index = up(8,6);
-  const middle = up(12,10);
-  const ring = up(16,14);
-  const pinky = up(20,18);
-
-  const dx = hand[4].x - hand[8].x;
-  const dy = hand[4].y - hand[8].y;
-  const pinch = Math.hypot(dx,dy) < 0.05;
-
-  if (pinch) return "MOVE";
-  if (!index && !middle && !ring && !pinky) return "PAUSE";
-  if (index && !middle && !ring && !pinky) return "DRAW";
-
-  return "IDLE";
+/* ── Mode colours ── */
+const MCOL = { DRAW:'#39ff14', PAUSE:'#ff3a5c', MOVE:'#ffe600', IDLE:'#00ffff' };
+const MLABEL = { DRAW:'✏️ DRAW', PAUSE:'✊ PAUSE', MOVE:'🤏 MOVE', IDLE:'⬡ IDLE' };
+function setMode(m) {
+  modeEl.textContent    = MLABEL[m]||'⬡ IDLE';
+  modeEl.style.color    = MCOL[m]||'#00ffff';
+  modeEl.style.borderColor = MCOL[m]||'#00ffff';
+  modeEl.style.textShadow  = `0 0 12px ${MCOL[m]||'#00ffff'}`;
 }
 
-/* ===== DRAW ===== */
-function drawAll() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+/* ── Skeleton connections ── */
+const CONN = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],[0,17]
+];
 
+/* ── Render ── */
+function render(hand, mode) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  /* strokes */
   strokes.forEach(s => {
-    if (s.points.length < 2) return;
+    if (s.pts.length < 2) return;
+    // glow
+    ctx.save();
+    ctx.shadowColor = s.color; ctx.shadowBlur = 18;
+    ctx.strokeStyle = s.color+'66'; ctx.lineWidth = 10;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    path(s.pts); ctx.restore();
+    // core
+    ctx.save();
+    ctx.strokeStyle = s.color; ctx.lineWidth = 3;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    path(s.pts); ctx.restore();
+  });
 
+  if (!hand) return;
+
+  /* skeleton */
+  const col = mode==='DRAW' ? '#39ff14' : '#00ffff';
+  ctx.save();
+  ctx.strokeStyle = col+'88'; ctx.lineWidth = 1.5;
+  CONN.forEach(([a,b]) => {
     ctx.beginPath();
-    ctx.strokeStyle = s.color;
-    ctx.lineWidth = 4;
-    ctx.lineCap = "round";
-
-    ctx.moveTo(s.points[0].x + offset.x, s.points[0].y + offset.y);
-
-    for (let i=1;i<s.points.length;i++) {
-      ctx.lineTo(
-        s.points[i].x + offset.x,
-        s.points[i].y + offset.y
-      );
-    }
+    ctx.moveTo(fx(hand[a].x), fy(hand[a].y));
+    ctx.lineTo(fx(hand[b].x), fy(hand[b].y));
     ctx.stroke();
   });
+  hand.forEach((p,i) => {
+    const big = [4,8,12,16,20].includes(i);
+    ctx.beginPath();
+    ctx.arc(fx(p.x), fy(p.y), big?6:3, 0, Math.PI*2);
+    ctx.fillStyle = big?'#fff':col+'cc';
+    if (big) { ctx.shadowColor=col; ctx.shadowBlur=10; }
+    ctx.fill();
+  });
+  ctx.restore();
 }
 
-/* ===== MEDIAPIPE ===== */
+function path(pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x+offX, pts[0].y+offY);
+  for (let i=1;i<pts.length-1;i++) {
+    const mx=(pts[i].x+pts[i+1].x)/2+offX;
+    const my=(pts[i].y+pts[i+1].y)/2+offY;
+    ctx.quadraticCurveTo(pts[i].x+offX, pts[i].y+offY, mx, my);
+  }
+  const l=pts.at(-1);
+  ctx.lineTo(l.x+offX, l.y+offY);
+  ctx.stroke();
+}
+
+/* ── MediaPipe Hands ── */
 const hands = new Hands({
   locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
 });
-
 hands.setOptions({
   maxNumHands:1,
-  minDetectionConfidence:0.7,
-  minTrackingConfidence:0.7
+  modelComplexity:1,
+  minDetectionConfidence:0.65,
+  minTrackingConfidence:0.65
 });
 
 hands.onResults(res => {
-  drawAll();
-
-  if (!res.multiHandLandmarks) {
-    mode = "IDLE";
-    currentStroke = null;
-    pinchStart = null;
-    modeText.innerText = "MODE: IDLE";
+  if (!res.multiHandLandmarks?.length) {
+    render(null, 'IDLE');
+    setMode('IDLE');
+    curStroke = null; pAnchorFX = null;
+    statusEl.textContent = '✋ Show your hand';
     return;
   }
 
+  statusEl.textContent = '🟢 Hand detected';
   const hand = res.multiHandLandmarks[0];
-  const newMode = detect(hand);
-  const finger = getPos(hand[8]);
+  const g    = gesture(hand);
+  setMode(g);
 
-  if (mode !== newMode) {
-    if (newMode !== "DRAW") currentStroke = null;
-    if (newMode !== "MOVE") pinchStart = null;
-    mode = newMode;
-  }
-
-  modeText.innerText = "MODE: " + mode;
-
-  /* DRAW */
-  if (mode === "DRAW") {
-    if (!currentStroke) {
-      currentStroke = {points:[], color:"#00ffff"};
-      strokes.push(currentStroke);
-    }
-
-    currentStroke.points.push({
-      x: finger.x - offset.x,
-      y: finger.y - offset.y
-    });
-  }
+  /* smooth index tip */
+  const rawX = fx(hand[8].x);
+  const rawY = fy(hand[8].y);
+  sX = sX*SMOOTH + rawX*(1-SMOOTH);
+  sY = sY*SMOOTH + rawY*(1-SMOOTH);
 
   /* MOVE */
-  if (mode === "MOVE") {
-    if (!pinchStart) {
-      pinchStart = {x: finger.x, y: finger.y};
-      offsetStart = {...offset};
+  if (g==='MOVE') {
+    if (pAnchorFX===null) {
+      pAnchorFX=sX; pAnchorFY=sY;
+      pAnchorOX=offX; pAnchorOY=offY;
+      curStroke=null;
+    } else {
+      offX = pAnchorOX+(sX-pAnchorFX);
+      offY = pAnchorOY+(sY-pAnchorFY);
     }
-
-    offset.x = offsetStart.x + (finger.x - pinchStart.x);
-    offset.y = offsetStart.y + (finger.y - pinchStart.y);
+  } else {
+    pAnchorFX=null;
   }
+
+  /* DRAW */
+  if (g==='DRAW') {
+    const dp = {x:sX-offX, y:sY-offY};
+    if (!curStroke) {
+      curStroke={color:penColor, pts:[dp]};
+      strokes.push(curStroke);
+    } else {
+      const last=curStroke.pts.at(-1);
+      if (Math.hypot(dp.x-last.x,dp.y-last.y)>2) curStroke.pts.push(dp);
+    }
+  } else {
+    curStroke=null;
+  }
+
+  render(hand, g);
 });
 
-/* ===== CAMERA (FIXED) ===== */
-const camera = new Camera(video, {
-  onFrame: async () => {
-    await hands.send({image: video});
-  },
-  width:640,
-  height:480
-});
+/* ── Buttons ── */
+document.getElementById('btn-clear').onclick = () => {
+  strokes=[]; curStroke=null; offX=0; offY=0;
+};
+document.getElementById('btn-undo').onclick = () => {
+  if (curStroke) { strokes.pop(); curStroke=null; }
+  else if (strokes.length) strokes.pop();
+};
 
-camera.start().catch(e => {
-  alert("Camera error: " + e);
-});
+/* ── Camera — getUserMedia directly (most reliable) ── */
+async function startCamera() {
+  statusEl.textContent = '📷 Requesting camera...';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width:{ideal:1280}, height:{ideal:720}, facingMode:'user' },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    statusEl.textContent = '✅ Camera on — show your hand!';
+
+    /* feed frames to MediaPipe manually */
+    async function loop() {
+      if (video.readyState >= 2) {
+        await hands.send({ image: video });
+      }
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+  } catch(err) {
+    statusEl.textContent = '❌ Camera error: ' + err.message;
+    console.error(err);
+  }
+}
+
+startCamera();
 </script>
-
 </body>
 </html>
